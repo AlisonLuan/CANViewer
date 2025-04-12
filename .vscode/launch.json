@@ -1,0 +1,15 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Debug via Live Server in Edge",
+        "type": "msedge",
+        "request": "launch",
+        "url": "http://127.0.0.1:5500/index.html",
+        "webRoot": "${workspaceFolder}",
+        "runtimeExecutable": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "useWebView": false
+      }
+    ]
+  }
+  
