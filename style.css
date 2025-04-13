@@ -1,43 +1,62 @@
 body {
-    font-family: sans-serif;
-    padding: 20px;
-    max-width: 800px;
-    margin: auto;
-  }
-  
-  .log-table {
-    width: 100%;
-    border-collapse: collapse;
-    text-align: left;
-  }
-  
-  .log-table th {
-    padding: 8px;
-    border-bottom: 1px solid #ccc;
-    background: #eee;
-  }
-  
-  .log-table td {
-    padding: 4px;
-    font-family: monospace;
-  }
-  
-  #sender {
-    margin-top: 20px;
-  }
-  
-  input, button {
-    margin: 5px;
-    padding: 5px;
-  }
-  
-  label {
-    display: block;
-    margin-top: 10px;
-  }
-  
-  #connect-status {
-    margin-left: 10px;
-    font-weight: bold;
-  }
-  
+  font-family: sans-serif;
+  padding: 20px;
+  max-width: 900px;
+  margin: auto;
+  background: #fff;
+  color: #333;
+}
+
+h1, h2 {
+  margin-top: 1.5em;
+}
+
+button, input {
+  padding: 6px 10px;
+  margin: 5px 0;
+  font-size: 1em;
+}
+
+label {
+  display: block;
+  margin-top: 10px;
+}
+
+#connect-status {
+  margin-left: 10px;
+  font-weight: bold;
+}
+
+#sender {
+  margin-top: 20px;
+}
+
+/* Scrollable table wrapper */
+#log-table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+#log-table th, #log-table td {
+  padding: 6px 12px;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+  font-family: monospace;
+}
+
+#log-table thead {
+  background-color: #eee;
+  position: sticky;
+  top: 0;
+}
+
+.log-table {
+  border: 1px solid #ccc;
+}
+
+#log-table-wrapper {
+  max-height: 420px; /* approx 20 rows */
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  margin-bottom: 20px;
+}

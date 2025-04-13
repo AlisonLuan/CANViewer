@@ -13,17 +13,20 @@
   <span id="connect-status">Not Connected</span>
 
   <h2>📥 Message Log</h2>
-  <table id="log-table" class="log-table">
-    <thead>
-      <tr>
-        <th>CAN ID</th>
-        <th>Type</th>
-        <th>DLC</th>
-        <th>Data</th>
-      </tr>
-    </thead>
-    <tbody id="log-body"></tbody>
-  </table>
+  <div id="log-table-wrapper">
+    <table id="log-table" class="log-table">
+      <thead>
+        <tr>
+          <th>Timestamp</th>
+          <th>CAN ID</th>
+          <th>Type</th>
+          <th>DLC</th>
+          <th>Data</th>
+        </tr>
+      </thead>
+      <tbody id="log-body"></tbody>
+    </table>
+  </div>    
 
   <h2>📤 CAN Sender</h2>
   <div id="sender">
@@ -48,8 +51,23 @@
     function logCANMessage(idHex, type, dlc, dataArray) {
       const tr = document.createElement("tr");
 
+      const tdTimestamp = document.createElement("td");
+      const now = new Date();
+      const timeString = now.toLocaleTimeString('en-US', { hour12: false }) + '.' + now.getMilliseconds().toString().padStart(3, '0');
+      tdTimestamp.textContent = timeString;
+
       const tdId = document.createElement("td");
-      tdId.textContent = idHex;
+      let rawId = parseInt(idHex, 16);
+      let formattedId;
+
+      if (type === "STD") {
+        rawId &= 0x7FF;
+        formattedId = rawId.toString(16).padStart(3, '0').toUpperCase(); // 11-bit
+      } else {
+        rawId &= 0x1FFFFFFF;
+        formattedId = rawId.toString(16).padStart(8, '0').toUpperCase(); // 29-bit
+      }
+      tdId.textContent = formattedId;
 
       const tdType = document.createElement("td");
       tdType.textContent = type;
@@ -60,6 +78,7 @@
       const tdData = document.createElement("td");
       tdData.textContent = dataArray.join(" ");
 
+      tr.appendChild(tdTimestamp);
       tr.appendChild(tdId);
       tr.appendChild(tdType);
       tr.appendChild(tdDlc);
