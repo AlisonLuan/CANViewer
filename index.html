@@ -57,15 +57,19 @@
       tdTimestamp.textContent = timeString;
 
       const tdId = document.createElement("td");
-      let rawId = parseInt(idHex, 16);
       let formattedId;
-
-      if (type === "STD") {
-        rawId &= 0x7FF;
-        formattedId = rawId.toString(16).padStart(3, '0').toUpperCase(); // 11-bit
+      if (type === "SYS") {
+        formattedId = idHex;
       } else {
-        rawId &= 0x1FFFFFFF;
-        formattedId = rawId.toString(16).padStart(8, '0').toUpperCase(); // 29-bit
+        let rawId = parseInt(idHex, 16);
+        if (isNaN(rawId)) rawId = 0;
+        if (type === "STD") {
+          rawId &= 0x7FF;
+          formattedId = rawId.toString(16).padStart(3, '0').toUpperCase();
+        } else {
+          rawId &= 0x1FFFFFFF;
+          formattedId = rawId.toString(16).padStart(8, '0').toUpperCase();
+        }
       }
       tdId.textContent = formattedId;
 
@@ -85,6 +89,11 @@
       tr.appendChild(tdData);
 
       logBody.appendChild(tr);
+      // Limit log size to prevent excessive memory usage
+      const MAX_LOG_ROWS = 500;
+      if (logBody.children.length > MAX_LOG_ROWS) {
+        logBody.removeChild(logBody.firstChild);
+      }
       tr.scrollIntoView({ behavior: "smooth" });
     }
 
