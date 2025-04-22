@@ -12,13 +12,13 @@
   <button id="connect-btn">Connect</button>
   <span id="connect-status">Not Connected</span>
 
-  <h2>📥 Message Log</h2>
+  <h2>📥 CAN Bus Log</h2>
   <div id="log-table-wrapper">
     <table id="log-table" class="log-table">
       <thead>
         <tr>
           <th>Timestamp</th>
-          <th>CAN ID</th>
+          <th>CAN ID</th> 
           <th>Type</th>
           <th>DLC</th>
           <th>Data</th>
@@ -28,19 +28,33 @@
     </table>
   </div>    
 
-  <h2>📤 CAN Sender</h2>
+  <h2>📤 CAN Message Sender</h2>
   <div id="sender">
+
     <label>CAN ID (hex, 8 chars):
       <input type="text" id="can-id" maxlength="8" placeholder="e.g. 1FFFFFFF" />
     </label>
+
+    <label>
+      ID Type:
+      <select id="can-id-type">
+        <option value="STD">Standard (11-bit)</option>
+        <option value="EXT">Extended (29-bit)</option>
+      </select>
+    </label>
+    
     <label>Data (hex bytes, space separated):
       <input type="text" id="can-data" placeholder="e.g. 11 22 33" />
     </label>
+
     <label>Send Interval (ms):
       <input type="number" id="send-interval" min="0" max="65535" value="100" />
     </label>
+
     <button id="send-btn">Send Now</button>
+
     <label><input type="checkbox" id="send-on-space" /> Send on Spacebar</label>
+    
   </div>
 
   <script src="script.js"></script>

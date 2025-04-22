@@ -102,19 +102,33 @@ function parseHexInput(input) {
 
 async function sendCANMessage() {
   if (!device) return;
+
   const idInput = document.getElementById("can-id").value;
   const dataInput = document.getElementById("can-data").value;
-  const id = parseInt(idInput, 16);
+  const idType = document.getElementById("can-id-type").value;
+
+  let id = parseInt(idInput, 16);
+  if (isNaN(id)) id = 0;
+
+  // Sanitize ID based on type
+  if (idType === "STD") {
+    id &= 0x7FF;
+  } else {
+    id &= 0x1FFFFFFF;
+    id |= 0x80000000; // Set MSB for extended
+  }
+
   const data = parseHexInput(dataInput);
   const buffer = new ArrayBuffer(5 + data.length);
   const view = new DataView(buffer);
+
   view.setUint32(0, id, true);
   view.setUint8(4, data.length);
   data.forEach((val, idx) => view.setUint8(5 + idx, val));
 
   try {
     await device.transferOut(1, buffer);
-    logCANMessage(idInput.toUpperCase().padStart(8, '0'), "TX", data.length, data);
+    logCANMessage(id.toString(16).toUpperCase().padStart(8, '0'), "TX", data.length, data);
   } catch (err) {
     console.error(err);
     logCANMessage("----", "SYS", "-", [err.message || "Error"]);
