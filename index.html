@@ -3,29 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="WebUSB-based CAN bus interface for logging and sending CAN messages directly from your browser.">
   <title>WebUSB CAN Interface</title>
+  <!-- Main stylesheet -->
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Page header with connection controls -->
+  <!-- Skip link for accessibility -->
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
   <header>
     <h1>WebUSB CAN Interface</h1>
-    <button
-      type="button"
-      id="connect-button"
-      aria-controls="connect-status"
-      aria-live="polite"
-    >
-      Connect
-    </button>
-    <span id="connect-status" role="status">Not Connected</span>
+    <!-- Primary actions: connect and export log -->
+    <nav aria-label="Main actions">
+      <button
+        type="button"
+        id="connect-button"
+        aria-controls="connect-status"
+        aria-live="polite"
+      >
+        Connect
+      </button>
+      <span id="connect-status" role="status">Not Connected</span>
+      <button
+        type="button"
+        id="export-button"
+        aria-label="Export the full CAN log"
+      >
+        Export Log
+      </button>
+    </nav>
   </header>
 
-  <main>
+  <main id="main-content">
     <!-- CAN bus log section -->
     <section aria-labelledby="log-heading">
       <h2 id="log-heading">CAN Bus Log</h2>
-      <div id="log-table-wrapper">
+      <!-- Live region for dynamic updates -->
+      <div id="log-table-wrapper" aria-live="polite">
         <table id="log-table" class="log-table">
           <caption>Received CAN messages with timestamps, identifiers, and data</caption>
           <thead>
@@ -37,7 +52,7 @@
               <th scope="col">Data</th>
             </tr>
           </thead>
-          <tbody id="log-body"><!-- Populated dynamically --></tbody>
+          <tbody id="log-body"><!-- Populated by JavaScript --></tbody>
         </table>
       </div>
     </section>
@@ -45,7 +60,7 @@
     <!-- CAN message sender section -->
     <section aria-labelledby="sender-heading">
       <h2 id="sender-heading">CAN Message Sender</h2>
-      <form id="message-sender">
+      <form id="message-sender" novalidate>
         <fieldset>
           <legend>Configure and send CAN messages</legend>
 
@@ -57,7 +72,7 @@
               name="canId"
               maxlength="8"
               pattern="[0-9A-Fa-f]{8}"
-              title="Enter exactly 8 hexadecimal characters (0-9, A-F)"
+              title="Exactly 8 hexadecimal characters (0-9, A-F)"
               placeholder="e.g. 1FFFFFFF"
               required
             >
@@ -78,8 +93,8 @@
               id="can-data"
               name="canData"
               placeholder="e.g. 11 22 33"
-              pattern="^([0-9A-Fa-f]{2})(\s[0-9A-Fa-f]{2})*$"
-              title="Enter hex bytes (2 characters) separated by spaces"
+              pattern="^([0-9A-Fa-f]{2})(\\s[0-9A-Fa-f]{2})*$"
+              title="Hex bytes (2 characters) separated by spaces"
             >
           </div>
 
@@ -107,16 +122,17 @@
             >
             <label for="send-on-space">Send on Spacebar</label>
           </div>
+
         </fieldset>
       </form>
     </section>
   </main>
 
-  <!-- Load your module and initialize it -->
+  <!-- Module script: load and initialize after DOM is ready -->
   <script type="module">
     import { init } from './canUsbLogger.js';
-    // on module load, bind everything
-    init();
+    document.addEventListener('DOMContentLoaded', () => init());
   </script>
 </body>
 </html>
+<!-- End of index.html -->
