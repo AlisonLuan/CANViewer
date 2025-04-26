@@ -105,3 +105,23 @@ label {
   font-size: 0.9em;
   padding: 4px 8px;
 }
+
+#send-table-wrapper {
+  max-height: 240px;  /* ~10 rows */
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  margin-bottom: 20px;
+}
+
+#send-table th,
+#send-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #ddd;
+  font-family: monospace;
+}
+
+#send-table thead {
+  background: #eee;
+  position: sticky;
+  top: 0;
+}

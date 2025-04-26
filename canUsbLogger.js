@@ -3,405 +3,495 @@
 import { generateCsv, generateTrc, generateAsc } from './traceExporter.js';
 
 /**
- * @module canUsbLogger
- * Manages USB-CAN connection, in-memory logging, 20-row display, and multi-format export.
+ * Manages USB‐CAN connection, logging, unique entry table, send‐template table, and exports.
  */
+class CanUsbLogger {
+  // USB constants
+  static USB_VENDOR_ID        = 0x0483;
+  static USB_INTERFACE_NUMBER = 0;
+  static USB_ENDPOINT_IN      = 1;
+  static USB_ENDPOINT_OUT     = 1;
 
-// ————— Constants ——————————————————————————————————————————————————————
+  // Display constants
+  static VISIBLE_LOG_ROWS     = 20;
+  static UNIQUE_TABLE_ROWS    = 10;
 
-export const USB_VENDOR_ID        = 0x0483;
-export const USB_INTERFACE_NUMBER = 0;
-export const USB_ENDPOINT_IN      = 1;
-export const USB_ENDPOINT_OUT     = 1;
-
-const VISIBLE_LOG_ROWS = 20;
-const SELECTORS = {
-  logBody:        '#log-body',
-  connectBtn:     '#connect-button',
-  statusLabel:    '#connect-status',
-  sendBtn:        '#send-button',
-  intervalSelect: '#send-interval',
-  spacebarBox:    '#send-on-space',
-  exportBtn:      '#export-button',
-};
-
-// ————— State ——————————————————————————————————————————————————————
-
-let usbDevice         = null;
-let sendIntervalId    = null;
-let fullLog           = [];    // unlimited retention
-let startTimeMs       = null;  // for computing offsets in seconds
-
-// UI elements (populated in init)
-let logTableBody;
-let connectButton;
-let connectionStatus;
-let sendButton;
-let intervalSelect;
-let spacebarCheckbox;
-let exportButton;
-
-// Track one entry per ID+type (ordered by most recent insertion)
-const uniqueMap = new Map();
-
-// ————— Initialization —————————————————————————————————————————————————
-
-/**
- * Binds DOM elements and hooks up event listeners.
- * @param {Object} [ids]           CSS selectors override
- */
-export function init(ids = {}) {
-  const s = { ...SELECTORS, ...ids };
-
-  logTableBody     = document.querySelector(s.logBody);
-  connectButton    = document.querySelector(s.connectBtn);
-  connectionStatus = document.querySelector(s.statusLabel);
-  sendButton       = document.querySelector(s.sendBtn);
-  intervalSelect   = document.querySelector(s.intervalSelect);
-  spacebarCheckbox = document.querySelector(s.spacebarBox);
-  exportButton     = document.querySelector(s.exportBtn);
-
-  if (!logTableBody || !connectButton || !sendButton || !exportButton) {
-    throw new Error('canUsbLogger.init: Missing required DOM elements');
-  }
-
-  renderLog(); // show empty padded table
-  renderUnique();    // <-- ensure the 10-row skeleton shows immediately
-
-  connectButton.addEventListener('click',      connectDevice);
-  sendButton.addEventListener('click',         sendCanMessage);
-  intervalSelect.addEventListener('change',    onIntervalChange);
-  spacebarCheckbox.addEventListener('change',  onSpacebarToggle);
-  exportButton.addEventListener('click',       exportLog);
-
-  document.getElementById('clear-unique').addEventListener('click', () => {
-    uniqueMap.clear();
-    renderUnique();
-  });  
-}
-
-// ————— Helpers ——————————————————————————————————————————————————————
-
-/** @returns {string} "HH:mm:ss.SSS" */
-export const getFormattedTimestamp = () => {
-  const now  = new Date();
-  const time = now.toLocaleTimeString('en-GB', { hour12: false });
-  const ms   = String(now.getMilliseconds()).padStart(3, '0');
-  return `${time}.${ms}`;
-};
-
-/**
- * Normalize and format a CAN ID for display.
- * @param {string} idHex – raw hex string
- * @param {'SYS'|'STD'|'EXT'} type
- * @returns {string} padded uppercase hex
- */
-export function formatCanId(idHex, type) {
-  if (type === 'SYS') return idHex.toUpperCase();
-
-  let raw = parseInt(idHex, 16);
-  if (Number.isNaN(raw)) {
-    console.warn(`formatCanId: invalid "${idHex}", using 0`);
-    raw = 0;
-  }
-
-  raw &= (type === 'STD' ? 0x7FF : 0x1FFFFFFF);
-  const width = type === 'STD' ? 3 : 8;
-  return raw.toString(16).padStart(width, '0').toUpperCase();
-}
-
-/**
- * Parse a space-separated hex string into byte values.
- * @param {string} input
- * @returns {number[]}
- * @throws {Error} on invalid byte
- */
-export const parseHexString = (input) => {
-  return input.trim().split(/\s+/).map((chunk) => {
-    const val = parseInt(chunk, 16);
-    if (Number.isNaN(val)) {
-      throw new Error(`parseHexString: invalid byte "${chunk}"`);
-    }
-    return val;
-  });
-};
-
-// ————— Rendering ————————————————————————————————————————————————————
-
-/**
- * Render the newest VISIBLE_LOG_ROWS entries (newest at top).
- * Pads with blanks if fewer.
- */
-function renderLog() {
-  logTableBody.innerHTML = '';
-
-  const recent = fullLog.slice(-VISIBLE_LOG_ROWS).reverse();
-  const padCount = VISIBLE_LOG_ROWS - recent.length;
-
-  recent.forEach(({ timestamp, id, type, dlc, data }) => {
-    const tr = document.createElement('tr');
-    [timestamp, id, type, dlc, data].forEach((text) => {
-      const td = document.createElement('td');
-      td.textContent = text;
-      tr.appendChild(td);
-    });
-    logTableBody.appendChild(tr);
-  });
-
-  for (let i = 0; i < padCount; i++) {
-    const tr = document.createElement('tr');
-    Array.from({ length: 5 }).forEach(() => tr.appendChild(document.createElement('td')));
-    logTableBody.appendChild(tr);
-  }
-}
-
-// ————— Logging —————————————————————————————————————————————————————
-
-/**
- * Store a new CAN message and re-render the display.
- * @param {string} idHex
- * @param {'SYS'|'STD'|'EXT'|'TX'} type
- * @param {number} dlc
- * @param {string[]} dataBytes
- */
-export function logCanMessage(idHex, type, dlc, dataBytes) {
-  if (fullLog.length === 0) startTimeMs = performance.now();
-  const offset = (performance.now() - startTimeMs) / 1000;
-  const entry = {
-    timestamp: getFormattedTimestamp(),
-    offset,
-    id:        formatCanId(idHex, type),
-    type,
-    dlc,
-    data:      dataBytes.join(' ')
+  // Default selectors (can be overridden in init)
+  static SELECTORS = {
+    logBody:        '#log-body',
+    connectBtn:     '#connect-button',
+    statusLabel:    '#connect-status',
+    spacebarBox:    '#send-on-space',
+    exportBtn:      '#export-button',
+    clearUnique:    '#clear-unique',
+    sendBody:       '#send-body',
+    uniqueBody:     '#unique-body',
   };
-  fullLog.push(entry);
 
-  // UNIQUE logic: only first insertion fixes row position—but update its count & latest data
-  const key = entry.id + '|' + entry.type;
-  if (uniqueMap.has(key)) {
-    const uni = uniqueMap.get(key);
-    uni.count++;
-    uni.timestamp = entry.timestamp;
-    uni.dlc       = entry.dlc;
-    uni.data      = entry.data;
-  } else {
-    entry.count = 1;
-    uniqueMap.set(key, entry);
-  }
-
-  renderLog();
-  renderUnique();
-}
-
-// ————— USB Connection & I/O ——————————————————————————————————————
-
-/** Connect to USB-CAN device and start reading. */
-export async function connectDevice() {
-  try {
-    usbDevice = await navigator.usb.requestDevice({
-      filters: [{ vendorId: USB_VENDOR_ID }],
-    });
-    await usbDevice.open();
-    if (!usbDevice.configuration) {
-      await usbDevice.selectConfiguration(1);
-    }
-    await usbDevice.claimInterface(USB_INTERFACE_NUMBER);
-
-    connectionStatus.textContent = 'Connected';
-    listenToDevice();
-  } catch (error) {
-    console.error(error);
-    logCanMessage('----', 'SYS', 0, [error.message || 'Connection Error']);
-  }
-}
-
-/** Continuous read loop: parse frames and log them. */
-export async function listenToDevice() {
-  while (usbDevice && usbDevice.opened) {
-    try {
-      const result = await usbDevice.transferIn(USB_ENDPOINT_IN, 64);
-      if (result.status === 'ok' && result.data.byteLength >= 5) {
-        const view      = new DataView(result.data.buffer);
-        const raw       = view.getUint32(0, true);
-        const dlc       = view.getUint8(4);
-        const byteCount = Math.min(dlc, result.data.byteLength - 5);
-        const bytes     = Array.from({ length: byteCount }, (_, i) =>
-          view.getUint8(5 + i).toString(16).padStart(2, '0').toUpperCase()
-        );
-
-        const msgType = (raw & 0x80000000) ? 'EXT' : 'STD';
-        const rawHex  = raw.toString(16).padStart(8, '0');
-        logCanMessage(rawHex, msgType, dlc, bytes);
-      }
-    } catch (error) {
-      console.error(error);
-      logCanMessage('----', 'SYS', 0, [error.message || 'Read Error']);
-      break;
-    }
-  }
-}
-
-// ————— Sending —————————————————————————————————————————————————————
-
-/** Build and send a CAN message from UI inputs. */
-export async function sendCanMessage() {
-  if (!usbDevice) return;
-
-  const idInput   = document.getElementById('can-id').value;
-  const dataInput = document.getElementById('can-data').value;
-  const type      = document.getElementById('can-id-type').value;
-
-  let id = parseInt(idInput, 16);
-  if (Number.isNaN(id)) {
-    console.warn(`sendCanMessage: invalid ID "${idInput}", using 0`);
-    id = 0;
-  }
-
-  if (type === 'STD') {
-    id &= 0x7FF;
-  } else {
-    id = (id & 0x1FFFFFFF) | 0x80000000;
-  }
-
-  let dataBytes;
-  try {
-    dataBytes = parseHexString(dataInput);
-  } catch (error) {
-    console.error(error);
-    logCanMessage('----', 'SYS', 0, [error.message]);
-    return;
-  }
-
-  const buffer = new ArrayBuffer(5 + dataBytes.length);
-  const view   = new DataView(buffer);
-  view.setUint32(0, id, true);
-  view.setUint8(4, dataBytes.length);
-  dataBytes.forEach((b, i) => view.setUint8(5 + i, b));
-
-  try {
-    await usbDevice.transferOut(USB_ENDPOINT_OUT, buffer);
-    logCanMessage(
-      id.toString(16).padStart(8, '0'),
-      'TX',
-      dataBytes.length,
-      dataBytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+  constructor() {
+    this.usbDevice        = null;
+    this.fullLog          = [];
+    this.startTimeMs      = null;
+    this.uniqueMap        = new Map();
+    this.sendTemplates    = Array.from(
+      { length: CanUsbLogger.UNIQUE_TABLE_ROWS },
+      () => ({ id: '00000000', type: 'STD', data: '', interval: 100 })
     );
-  } catch (error) {
-    console.error(error);
-    logCanMessage('----', 'SYS', 0, [error.message || 'Send Error']);
+    this.sendTemplateTimers = new Map();
   }
-}
 
-// ————— UI Event Handlers ——————————————————————————————————————————————
+  /**
+   * Initialize UI bindings and render empty tables.
+   * @param {Object} [ids] CSS selector overrides
+   */
+  init(ids = {}) {
+    const sel = { ...CanUsbLogger.SELECTORS, ...ids };
 
-/** Toggle automatic send interval. */
-export function onIntervalChange(event) {
-  if (sendIntervalId) clearInterval(sendIntervalId);
-  const ms = Number(event.target.value);
-  if (ms > 0) {
-    sendIntervalId = setInterval(sendCanMessage, ms);
-  }
-}
+    this.logTableBody     = document.querySelector(sel.logBody);
+    this.connectButton    = document.querySelector(sel.connectBtn);
+    this.connectionStatus = document.querySelector(sel.statusLabel);
+    this.spacebarCheckbox = document.querySelector(sel.spacebarBox);
+    this.exportButton     = document.querySelector(sel.exportBtn);
+    this.clearUniqueBtn   = document.querySelector(sel.clearUnique);
+    this.sendTableBody    = document.querySelector(sel.sendBody);
+    this.uniqueTableBody  = document.querySelector(sel.uniqueBody);
 
-/** Toggle spacebar-to-send functionality. */
-export function onSpacebarToggle(event) {
-  if (event.target.checked) {
-    window.addEventListener('keydown', spacebarHandler);
-  } else {
-    window.removeEventListener('keydown', spacebarHandler);
-  }
-}
-
-/** Send when Space is pressed. */
-export function spacebarHandler(event) {
-  if (event.code === 'Space') {
-    event.preventDefault();
-    sendCanMessage();
-  }
-}
-
-// ————— Exporting ————————————————————————————————————————————————————
-
-/**
- * Prompt user to save current log in CSV, TRC, or ASC format.
- */
-export async function exportLog() {
-  try {
-    let fileHandle;
-    if (window.showSaveFilePicker) {
-      fileHandle = await window.showSaveFilePicker({
-        suggestedName: 'can-log',
-        types: [
-          {
-            description: 'CSV',
-            accept: { 'text/csv': ['.csv'] },
-          },
-          {
-            description: 'Peak TRC',
-            accept: { 'application/octet-stream': ['.trc'] },
-          },
-          {
-            description: 'ASC Log',
-            accept: { 'text/plain': ['.asc'] },
-          },
-        ],
-      });
+    if (
+      !this.logTableBody ||
+      !this.connectButton ||
+      !this.exportButton ||
+      !this.clearUniqueBtn ||
+      !this.sendTableBody ||
+      !this.uniqueTableBody
+    ) {
+      throw new Error('CanUsbLogger.init: missing required DOM elements');
     }
 
-    if (fileHandle) {
-      const ext = fileHandle.name.split('.').pop().toLowerCase();
-      let content;
-      if (ext === 'trc') content = generateTrc(fullLog, startTimeMs);
-      else if (ext === 'asc') content = generateAsc(fullLog, startTimeMs);
-      else content = generateCsv(fullLog);
+    this.renderLog();
+    this.renderUnique();
+    this.renderSendTable();
 
-      const writable = await fileHandle.createWritable();
-      await writable.write(content);
-      await writable.close();
-    } else {
-      // Fallback: CSV blob download
-      const blob = new Blob([generateCsv(fullLog)], { type: 'text/csv' });
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = 'can-log.csv';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    }
-  } catch (error) {
-    console.error('exportLog:', error);
-    logCanMessage('----', 'SYS', 0, [error.message]);
-  }
-}
-
-/**
- * Renders up to 10 unique messages (most recently updated) into #unique-body
- */
-function renderUnique() {
-  const tbody = document.getElementById('unique-body');
-  tbody.innerHTML = '';
-
-  // Always show in insertion order, up to 10 distinct entries
-  const entries = Array.from(uniqueMap.values()).slice(0, 10);
-  const pad     = 10 - entries.length;
-
-  entries.forEach(e => {
-    const tr = document.createElement('tr');
-    [e.timestamp, e.id, e.type, e.dlc, e.data, e.count].forEach(txt => {
-      const td = document.createElement('td');
-      td.textContent = txt;
-      tr.appendChild(td);
+    this.connectButton.addEventListener('click',      () => this.connectDevice());
+    this.spacebarCheckbox.addEventListener('change',  (e) => this.handleSpacebarToggle(e));
+    this.exportButton.addEventListener('click',       () => this.exportLog());
+    this.clearUniqueBtn.addEventListener('click',     () => {
+      this.uniqueMap.clear();
+      this.renderUnique();
     });
-    tbody.appendChild(tr);
-  });
+  }
 
-  // Pad out to exactly 10 rows
-  for (let i = 0; i < pad; i++) {
-    const tr = document.createElement('tr');
-    for (let j = 0; j < 6; j++) tr.appendChild(document.createElement('td'));
-    tbody.appendChild(tr);
+  /** @returns {string} "HH:mm:ss.SSS" */
+  getFormattedTimestamp() {
+    const now  = new Date();
+    const time = now.toLocaleTimeString('en-GB', { hour12: false });
+    const ms   = String(now.getMilliseconds()).padStart(3, '0');
+    return `${time}.${ms}`;
+  }
+
+  /**
+   * Normalize and pad a CAN ID for display.
+   * @param {string} idHex Raw hexadecimal string
+   * @param {'SYS'|'STD'|'EXT'} type
+   * @returns {string}
+   */
+  formatCanId(idHex, type) {
+    if (type === 'SYS') return idHex.toUpperCase();
+
+    let raw = parseInt(idHex, 16);
+    if (Number.isNaN(raw)) {
+      console.warn(`formatCanId: invalid "${idHex}", defaulting to 0`);
+      raw = 0;
+    }
+
+    raw &= (type === 'STD' ? 0x7FF : 0x1FFFFFFF);
+    const width = type === 'STD' ? 3 : 8;
+    return raw.toString(16).padStart(width, '0').toUpperCase();
+  }
+
+  /**
+   * Parse a space-separated hex string into byte values.
+   * @param {string} input
+   * @returns {number[]}
+   * @throws {Error} on invalid byte
+   */
+  parseHexString(input) {
+    return input.trim().split(/\s+/).map((chunk) => {
+      const value = parseInt(chunk, 16);
+      if (Number.isNaN(value)) {
+        throw new Error(`parseHexString: invalid byte "${chunk}"`);
+      }
+      return value;
+    });
+  }
+
+  /** Render the most recent rows in the main log table. */
+  renderLog() {
+    this.logTableBody.innerHTML = '';
+    const recent = this.fullLog.slice(-CanUsbLogger.VISIBLE_LOG_ROWS).reverse();
+    const padCount = CanUsbLogger.VISIBLE_LOG_ROWS - recent.length;
+
+    recent.forEach(({ timestamp, id, type, dlc, data }) => {
+      const tr = document.createElement('tr');
+      [timestamp, id, type, dlc, data].forEach((text) => {
+        const td = document.createElement('td');
+        td.textContent = text;
+        tr.appendChild(td);
+      });
+      this.logTableBody.appendChild(tr);
+    });
+
+    for (let i = 0; i < padCount; i++) {
+      const tr = document.createElement('tr');
+      Array.from({ length: 5 }).forEach(() => tr.appendChild(document.createElement('td')));
+      this.logTableBody.appendChild(tr);
+    }
+  }
+
+  /** Render up to 10 unique ID/type entries with counts. */
+  renderUnique() {
+    this.uniqueTableBody.innerHTML = '';
+    const entries = Array.from(this.uniqueMap.values()).slice(0, CanUsbLogger.UNIQUE_TABLE_ROWS);
+    const padCount = CanUsbLogger.UNIQUE_TABLE_ROWS - entries.length;
+
+    entries.forEach(({ timestamp, id, type, dlc, data, count }) => {
+      const tr = document.createElement('tr');
+      [timestamp, id, type, dlc, data, count].forEach((text) => {
+        const td = document.createElement('td');
+        td.textContent = text;
+        tr.appendChild(td);
+      });
+      this.uniqueTableBody.appendChild(tr);
+    });
+
+    for (let i = 0; i < padCount; i++) {
+      const tr = document.createElement('tr');
+      Array.from({ length: 6 }).forEach(() => tr.appendChild(document.createElement('td')));
+      this.uniqueTableBody.appendChild(tr);
+    }
+  }
+
+  /** Render the 10 send‐template rows with inputs and buttons. */
+  renderSendTable() {
+    this.sendTableBody.innerHTML = '';
+
+    this.sendTemplates.forEach((tpl, idx) => {
+      const tr = document.createElement('tr');
+
+      // ID input
+      const idTd = document.createElement('td');
+      const idIn = document.createElement('input');
+      idIn.type = 'text';
+      idIn.value = tpl.id;
+      idIn.maxLength = 8;
+      idIn.pattern = '[0-9A-Fa-f]{8}';
+      idIn.addEventListener('input', () => { tpl.id = idIn.value; });
+      idTd.appendChild(idIn);
+      tr.appendChild(idTd);
+
+      // Type select
+      const typeTd = document.createElement('td');
+      const sel = document.createElement('select');
+      ['STD', 'EXT'].forEach((v) => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v === 'STD' ? 'Standard' : 'Extended';
+        if (v === tpl.type) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.addEventListener('change', () => { tpl.type = sel.value; });
+      typeTd.appendChild(sel);
+      tr.appendChild(typeTd);
+
+      // Data input
+      const dataTd = document.createElement('td');
+      const dataIn = document.createElement('input');
+      dataIn.type = 'text';
+      dataIn.value = tpl.data;
+      dataIn.placeholder = 'e.g. 11 22 33';
+      dataIn.addEventListener('input', () => { tpl.data = dataIn.value; });
+      dataTd.appendChild(dataIn);
+      tr.appendChild(dataTd);
+
+      // Interval input
+      const intTd = document.createElement('td');
+      const intIn = document.createElement('input');
+      intIn.type = 'number';
+      intIn.min = '0';
+      intIn.max = '65535';
+      intIn.value = String(tpl.interval);
+      intIn.addEventListener('change', () => { tpl.interval = Number(intIn.value); });
+      intTd.appendChild(intIn);
+      tr.appendChild(intTd);
+
+      // Action button
+      const actTd = document.createElement('td');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = 'Send Now';
+      btn.addEventListener('click', () => this.sendCanMessageFromTemplate(tpl));
+      actTd.appendChild(btn);
+      tr.appendChild(actTd);
+
+      this.sendTableBody.appendChild(tr);
+    });
+  }
+
+  /**
+   * Log a new CAN message, update full log, unique map, and re-render.
+   * @param {string} idHex
+   * @param {'SYS'|'STD'|'EXT'|'TX'} type
+   * @param {number} dlc
+   * @param {string[]} dataBytes
+   */
+  logCanMessage(idHex, type, dlc, dataBytes) {
+    if (this.fullLog.length === 0) this.startTimeMs = performance.now();
+    const offset = (performance.now() - this.startTimeMs) / 1000;
+    const entry = {
+      timestamp: this.getFormattedTimestamp(),
+      offset,
+      id:        this.formatCanId(idHex, type),
+      type,
+      dlc,
+      data:      dataBytes.join(' '),
+    };
+
+    this.fullLog.push(entry);
+
+    // Unique map: update count or insert new
+    const key = `${entry.id}|${entry.type}`;
+    if (this.uniqueMap.has(key)) {
+      const existing = this.uniqueMap.get(key);
+      existing.count++;
+      existing.timestamp = entry.timestamp;
+      existing.dlc       = entry.dlc;
+      existing.data      = entry.data;
+    } else {
+      entry.count = 1;
+      this.uniqueMap.set(key, entry);
+    }
+
+    this.renderLog();
+    this.renderUnique();
+  }
+
+  /** Prompt user to connect to USB-CAN device, then start listening. */
+  async connectDevice() {
+    try {
+      this.usbDevice = await navigator.usb.requestDevice({
+        filters: [{ vendorId: CanUsbLogger.USB_VENDOR_ID }],
+      });
+      await this.usbDevice.open();
+      if (!this.usbDevice.configuration) {
+        await this.usbDevice.selectConfiguration(1);
+      }
+      await this.usbDevice.claimInterface(CanUsbLogger.USB_INTERFACE_NUMBER);
+
+      this.connectionStatus.textContent = 'Connected';
+      this.listenToDevice();
+    } catch (err) {
+      console.error(err);
+      this.logCanMessage('----', 'SYS', 0, [err.message || 'Connection Error']);
+    }
+  }
+
+  /** Continuous read loop: parse incoming frames and log them. */
+  async listenToDevice() {
+    while (this.usbDevice && this.usbDevice.opened) {
+      try {
+        const result = await this.usbDevice.transferIn(CanUsbLogger.USB_ENDPOINT_IN, 64);
+        if (result.status === 'ok' && result.data.byteLength >= 5) {
+          const view      = new DataView(result.data.buffer);
+          const raw       = view.getUint32(0, true);
+          const dlc       = view.getUint8(4);
+          const count     = Math.min(dlc, result.data.byteLength - 5);
+          const bytes     = Array.from({ length: count }, (_, i) =>
+            view.getUint8(5 + i).toString(16).padStart(2, '0').toUpperCase()
+          );
+
+          const msgType = (raw & 0x80000000) ? 'EXT' : 'STD';
+          const rawHex  = raw.toString(16).padStart(8, '0');
+          this.logCanMessage(rawHex, msgType, dlc, bytes);
+        }
+      } catch (err) {
+        console.error(err);
+        this.logCanMessage('----', 'SYS', 0, [err.message || 'Read Error']);
+        break;
+      }
+    }
+  }
+
+  /** Build and send a CAN message from UI inputs. */
+  async sendCanMessage() {
+    if (!this.usbDevice) return;
+
+    const idInput   = document.getElementById('can-id').value;
+    const dataInput = document.getElementById('can-data').value;
+    const type      = document.getElementById('can-id-type').value;
+
+    let rawId = parseInt(idInput, 16);
+    if (Number.isNaN(rawId)) {
+      console.warn(`sendCanMessage: invalid ID "${idInput}", defaulting to 0`);
+      rawId = 0;
+    }
+
+    if (type === 'STD') {
+      rawId &= 0x7FF;
+    } else {
+      rawId = (rawId & 0x1FFFFFFF) | 0x80000000;
+    }
+
+    let dataBytes;
+    try {
+      dataBytes = this.parseHexString(dataInput);
+    } catch (err) {
+      console.error(err);
+      this.logCanMessage('----', 'SYS', 0, [err.message]);
+      return;
+    }
+
+    const buffer = new ArrayBuffer(5 + dataBytes.length);
+    const view   = new DataView(buffer);
+    view.setUint32(0, rawId, true);
+    view.setUint8(4, dataBytes.length);
+    dataBytes.forEach((b, i) => view.setUint8(5 + i, b));
+
+    try {
+      await this.usbDevice.transferOut(CanUsbLogger.USB_ENDPOINT_OUT, buffer);
+      this.logCanMessage(
+        rawId.toString(16).padStart(8, '0'),
+        'TX',
+        dataBytes.length,
+        dataBytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+      );
+    } catch (err) {
+      console.error(err);
+      this.logCanMessage('----', 'SYS', 0, [err.message || 'Send Error']);
+    }
+  }
+
+  /** Handle changes to the send interval selector. */
+  handleIntervalChange(event) {
+    if (this.sendIntervalId) clearInterval(this.sendIntervalId);
+    const ms = Number(event.target.value);
+    if (ms > 0) {
+      this.sendIntervalId = setInterval(() => this.sendCanMessage(), ms);
+    }
+  }
+
+  /** Toggle spacebar‐to‐send functionality. */
+  handleSpacebarToggle(event) {
+    if (event.target.checked) {
+      window.addEventListener('keydown', (e) => this.spacebarHandler(e));
+    } else {
+      window.removeEventListener('keydown', (e) => this.spacebarHandler(e));
+    }
+  }
+
+  /** Send when Spacebar is pressed. */
+  spacebarHandler(event) {
+    if (event.code === 'Space') {
+      event.preventDefault();
+      this.sendCanMessage();
+    }
+  }
+
+  /** Export the full log in CSV, TRC, or ASC via file picker or fallback. */
+  async exportLog() {
+    try {
+      let handle;
+      if (window.showSaveFilePicker) {
+        handle = await window.showSaveFilePicker({
+          suggestedName: 'can-log',
+          types: [
+            { description: 'CSV', accept: { 'text/csv': ['.csv'] } },
+            { description: 'Peak TRC', accept: { 'application/octet-stream': ['.trc'] } },
+            { description: 'ASC Log', accept: { 'text/plain': ['.asc'] } },
+          ],
+        });
+      }
+
+      if (handle) {
+        const ext     = handle.name.split('.').pop().toLowerCase();
+        const content = ext === 'trc'
+          ? generateTrc(this.fullLog, this.startTimeMs)
+          : ext === 'asc'
+            ? generateAsc(this.fullLog, this.startTimeMs)
+            : generateCsv(this.fullLog);
+
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+      } else {
+        // Fallback to CSV download
+        const blob = new Blob([generateCsv(this.fullLog)], { type: 'text/csv' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = 'can-log.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err) {
+      console.error('exportLog:', err);
+      this.logCanMessage('----', 'SYS', 0, [err.message]);
+    }
+  }
+
+  /**
+   * Send a message based on a template, then reschedule it after `interval`.
+   * @param {{id:string,type:string,data:string,interval:number}} tpl
+   */
+  async sendCanMessageFromTemplate(tpl) {
+    if (!this.usbDevice) {
+      console.warn('Template send: USB device not connected');
+      return;
+    }
+
+    // Build and send exactly as sendCanMessage, but using tpl values...
+    let rawId = parseInt(tpl.id, 16);
+    if (Number.isNaN(rawId)) {
+      console.warn(`Invalid template ID "${tpl.id}", defaulting to 0`);
+      rawId = 0;
+    }
+    if (tpl.type === 'STD') {
+      rawId &= 0x7FF;
+    } else {
+      rawId = (rawId & 0x1FFFFFFF) | 0x80000000;
+    }
+
+    let dataBytes;
+    try {
+      dataBytes = this.parseHexString(tpl.data);
+    } catch (err) {
+      console.error(err);
+      this.logCanMessage('----', 'SYS', 0, [err.message]);
+      return;
+    }
+
+    const buffer = new ArrayBuffer(5 + dataBytes.length);
+    const view   = new DataView(buffer);
+    view.setUint32(0, rawId, true);
+    view.setUint8(4, dataBytes.length);
+    dataBytes.forEach((b, i) => view.setUint8(5 + i, b));
+
+    try {
+      await this.usbDevice.transferOut(CanUsbLogger.USB_ENDPOINT_OUT, buffer);
+      this.logCanMessage(
+        rawId.toString(16).padStart(8, '0'),
+        'TX',
+        dataBytes.length,
+        dataBytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase())
+      );
+    } catch (err) {
+      console.error(err);
+      this.logCanMessage('----', 'SYS', 0, [err.message]);
+    }
+
+    // Reschedule
+    setTimeout(() => this.sendCanMessageFromTemplate(tpl), tpl.interval);
   }
 }
+
+export default new CanUsbLogger();

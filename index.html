@@ -14,7 +14,7 @@
 
   <header>
     <h1>WebUSB CAN Interface</h1>
-    <!-- Primary actions: connect and export log -->
+    <!-- Top-level actions -->
     <nav aria-label="Main actions">
       <button
         type="button"
@@ -37,9 +37,9 @@
 
   <main id="main-content">
     <!-- CAN bus log section -->
-    <section aria-labelledby="log-heading">
+    <section id="log-section" aria-labelledby="log-heading">
       <h2 id="log-heading">CAN Bus Log</h2>
-      <!-- Live region for dynamic updates -->
+      <!-- Live region for incoming CAN messages -->
       <div id="log-table-wrapper" aria-live="polite">
         <table id="log-table" class="log-table">
           <caption>Received CAN messages with timestamps, identifiers, and data</caption>
@@ -57,11 +57,15 @@
       </div>
     </section>
 
-    <!-- Unique-message summary (max 10 rows) -->
-    <section aria-labelledby="unique-heading" id="unique-section">
+    <!-- Unique-message summary section (max 10 rows) -->
+    <section id="unique-section" aria-labelledby="unique-heading">
       <h2 id="unique-heading">Unique CAN Messages</h2>
-      <button type="button" id="clear-unique">Clear Unique</button>
-      <div id="unique-table-wrapper">
+      <!-- Controls for unique list -->
+      <div class="section-controls">
+        <button type="button" id="clear-unique">Clear Unique</button>
+      </div>
+      <!-- Live region for unique message updates -->
+      <div id="unique-table-wrapper" aria-live="polite">
         <table id="unique-table" class="log-table">
           <caption>Last 10 unique ID+type messages (most recent)</caption>
           <thead>
@@ -74,88 +78,40 @@
               <th scope="col">Count</th>
             </tr>
           </thead>
-          <tbody id="unique-body">
-            <!-- Populated dynamically -->
-          </tbody>
+          <tbody id="unique-body"><!-- Populated by JavaScript --></tbody>
         </table>
       </div>
     </section>
 
-    <!-- CAN message sender section -->
-    <section aria-labelledby="sender-heading">
+    <!-- CAN message sender section as table (up to 10 rows) -->
+    <section id="sender-section" aria-labelledby="sender-heading">
       <h2 id="sender-heading">CAN Message Sender</h2>
-      <form id="message-sender" novalidate>
-        <fieldset>
-          <legend>Configure and send CAN messages</legend>
-
-          <div class="form-group">
-            <label for="can-id">CAN ID (8 hex digits):</label>
-            <input
-              type="text"
-              id="can-id"
-              name="canId"
-              maxlength="8"
-              pattern="[0-9A-Fa-f]{8}"
-              title="Exactly 8 hexadecimal characters (0-9, A-F)"
-              placeholder="e.g. 1FFFFFFF"
-              required
-            >
-          </div>
-
-          <div class="form-group">
-            <label for="can-id-type">ID Type:</label>
-            <select id="can-id-type" name="idType">
-              <option value="STD">Standard (11-bit)</option>
-              <option value="EXT">Extended (29-bit)</option>
-            </select>
-          </div>
-
-          <div class="form-group">
-            <label for="can-data">Data (hex bytes, space separated):</label>
-            <input
-              type="text"
-              id="can-data"
-              name="canData"
-              placeholder="e.g. 11 22 33"
-              pattern="^([0-9A-Fa-f]{2})(\\s[0-9A-Fa-f]{2})*$"
-              title="Hex bytes (2 characters) separated by spaces"
-            >
-          </div>
-
-          <div class="form-group">
-            <label for="send-interval">Send Interval (ms):</label>
-            <input
-              type="number"
-              id="send-interval"
-              name="interval"
-              min="0"
-              max="65535"
-              value="100"
-            >
-          </div>
-
-          <div class="form-group">
-            <button type="button" id="send-button">Send Now</button>
-          </div>
-
-          <div class="form-group">
-            <input
-              type="checkbox"
-              id="send-on-space"
-              name="sendOnSpace"
-            >
-            <label for="send-on-space">Send on Spacebar</label>
-          </div>
-
-        </fieldset>
-      </form>
+      <!-- Control to add new messages -->
+      <div class="section-controls">
+        <button type="button" id="add-message">Add Message</button>
+      </div>
+      <div id="send-table-wrapper">
+        <table id="send-table" class="log-table">
+          <caption>Configure up to 10 messages to send</caption>
+          <thead>
+            <tr>
+              <th scope="col">CAN ID</th>
+              <th scope="col">Type</th>
+              <th scope="col">Data</th>
+              <th scope="col">Interval (ms)</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
+          <tbody id="send-body"><!-- Populated by JavaScript --></tbody>
+        </table>
+      </div>
     </section>
   </main>
 
   <!-- Module script: load and initialize after DOM is ready -->
   <script type="module">
-    import { init } from './canUsbLogger.js';
-    document.addEventListener('DOMContentLoaded', () => init());
+    import logger from './canUsbLogger.js';
+    document.addEventListener('DOMContentLoaded', () => logger.init());
   </script>
 </body>
 </html>
