@@ -5,27 +5,55 @@
  * Handles USB-CAN device connection, message logging, and message sending.
  */
 
-const USB_VENDOR_ID = 0x0483;
-const USB_INTERFACE_NUMBER = 0;
-const USB_ENDPOINT_IN = 1;
-const USB_ENDPOINT_OUT = 1;
-const MAX_LOG_ROWS = 500;
+// USB device constants
+export const USB_VENDOR_ID = 0x0483;
+export const USB_INTERFACE_NUMBER = 0;
+export const USB_ENDPOINT_IN = 1;
+export const USB_ENDPOINT_OUT = 1;
+export const MAX_LOG_ROWS = 500;
+
+// UI elements (can be overridden via init)
+let logTableBody;
+let connectButton;
+let connectionStatus;
+let sendButton;
+let sendIntervalSelect;
+let spacebarCheckbox;
 
 let usbDevice = null;
 let sendIntervalTimer = null;
 
-const logTableBody = document.getElementById('log-body');
-const connectButton = document.getElementById('connect-btn');
-const connectionStatus = document.getElementById('connect-status');
-const sendButton = document.getElementById('send-btn');
-const sendIntervalSelect = document.getElementById('send-interval');
-const spacebarCheckbox = document.getElementById('send-on-space');
+/**
+ * Initialize module by passing in selectors or DOM elements.
+ * @param {Object} selectors - Optional overrides for element selectors or elements.
+ */
+export function init({
+  logBody = '#log-body',
+  connectBtn = '#connect-button',
+  statusLabel = '#connect-status',
+  sendBtn = '#send-button',
+  intervalSelect = '#send-interval',
+  spacebarBox = '#send-on-space',
+} = {}) {
+  logTableBody     = (typeof logBody === 'string') ? document.querySelector(logBody) : logBody;
+  connectButton    = (typeof connectBtn === 'string') ? document.querySelector(connectBtn) : connectBtn;
+  connectionStatus = (typeof statusLabel === 'string') ? document.querySelector(statusLabel) : statusLabel;
+  sendButton       = (typeof sendBtn === 'string') ? document.querySelector(sendBtn) : sendBtn;
+  sendIntervalSelect = (typeof intervalSelect === 'string') ? document.querySelector(intervalSelect) : intervalSelect;
+  spacebarCheckbox = (typeof spacebarBox === 'string') ? document.querySelector(spacebarBox) : spacebarBox;
+
+  // Wire up UI events
+  connectButton.addEventListener('click',      connectDevice);
+  sendButton.addEventListener('click',         sendCanMessage);
+  sendIntervalSelect.addEventListener('change', handleIntervalChange);
+  spacebarCheckbox.addEventListener('change',   handleSpacebarToggle);
+}
 
 /**
  * Returns current time as "HH:mm:ss.SSS".
  * @returns {string}
  */
-const getFormattedTimestamp = () => {
+export const getFormattedTimestamp = () => {
   const now = new Date();
   const time = now.toLocaleTimeString('en-GB', { hour12: false });
   const ms = now.getMilliseconds().toString().padStart(3, '0');
@@ -38,7 +66,7 @@ const getFormattedTimestamp = () => {
  * @param {'SYS'|'STD'|'EXT'} type - Message type.
  * @returns {string}
  */
-const formatCanId = (idHex, type) => {
+export function formatCanId(idHex, type) {
   if (type === 'SYS') {
     return idHex.toUpperCase();
   }
@@ -57,7 +85,7 @@ const formatCanId = (idHex, type) => {
   // EXT
   raw &= 0x1FFFFFFF;
   return raw.toString(16).padStart(8, '0').toUpperCase();
-};
+}
 
 /**
  * Appends a CAN message row to the log table, trimming old entries.
@@ -66,7 +94,7 @@ const formatCanId = (idHex, type) => {
  * @param {number} dlc
  * @param {string[]} dataBytes
  */
-const logCanMessage = (idHex, type, dlc, dataBytes) => {
+export function logCanMessage(idHex, type, dlc, dataBytes) {
   const row = document.createElement('tr');
   const cells = {
     timestamp: getFormattedTimestamp(),
@@ -90,20 +118,16 @@ const logCanMessage = (idHex, type, dlc, dataBytes) => {
   }
 
   row.scrollIntoView({ behavior: 'smooth' });
-};
+}
 
 /**
  * Connects to the USB-CAN device and begins listening.
  */
-async function connectDevice() {
+export async function connectDevice() {
   try {
-    usbDevice = await navigator.usb.requestDevice({
-      filters: [{ vendorId: USB_VENDOR_ID }],
-    });
+    usbDevice = await navigator.usb.requestDevice({ filters: [{ vendorId: USB_VENDOR_ID }] });
     await usbDevice.open();
-    if (!usbDevice.configuration) {
-      await usbDevice.selectConfiguration(1);
-    }
+    if (!usbDevice.configuration) await usbDevice.selectConfiguration(1);
     await usbDevice.claimInterface(USB_INTERFACE_NUMBER);
 
     connectionStatus.textContent = 'Connected';
@@ -117,7 +141,7 @@ async function connectDevice() {
 /**
  * Continuously reads CAN frames from the device and logs them.
  */
-async function listenToDevice() {
+export async function listenToDevice() {
   while (usbDevice && usbDevice.opened) {
     try {
       const result = await usbDevice.transferIn(USB_ENDPOINT_IN, 64);
@@ -139,7 +163,7 @@ async function listenToDevice() {
     } catch (error) {
       console.error(error);
       logCanMessage('----', 'SYS', 0, [error.message || 'Read Error']);
-      break; // stop on persistent read error
+      break;
     }
   }
 }
@@ -149,29 +173,25 @@ async function listenToDevice() {
  * @param {string} input
  * @returns {number[]}
  */
-const parseHexString = input =>
+export const parseHexString = input =>
   input
     .trim()
     .split(/\s+/)
     .map(byte => {
       const val = parseInt(byte, 16);
-      if (Number.isNaN(val)) {
-        throw new Error(`Invalid hex byte "${byte}"`);
-      }
+      if (Number.isNaN(val)) throw new Error(`Invalid hex byte "${byte}"`);
       return val;
     });
 
 /**
  * Builds and sends a CAN message from UI inputs.
  */
-async function sendCanMessage() {
-  if (!usbDevice) {
-    return;
-  }
+export async function sendCanMessage() {
+  if (!usbDevice) return;
 
-  const idHexInput    = document.getElementById('can-id').value;
-  const dataHexInput  = document.getElementById('can-data').value;
-  const idType        = document.getElementById('can-id-type').value;
+  const idHexInput   = document.getElementById('can-id').value;
+  const dataHexInput = document.getElementById('can-data').value;
+  const idType       = document.getElementById('can-id-type').value;
 
   let id = parseInt(idHexInput, 16);
   if (Number.isNaN(id)) {
@@ -205,7 +225,12 @@ async function sendCanMessage() {
   try {
     await usbDevice.transferOut(USB_ENDPOINT_OUT, buffer);
     const idHex = id.toString(16).padStart(8, '0').toUpperCase();
-    logCanMessage(idHex, 'TX', dataBytes.length, dataBytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()));
+    logCanMessage(
+      idHex,
+      'TX',
+      dataBytes.length,
+      dataBytes.map(b => b.toString(16).padStart(2, '0').toUpperCase())
+    );
   } catch (error) {
     console.error(error);
     logCanMessage('----', 'SYS', 0, [error.message || 'Send Error']);
@@ -215,41 +240,30 @@ async function sendCanMessage() {
 /**
  * Handles enabling/disabling periodic send.
  */
-function handleIntervalChange(event) {
+export function handleIntervalChange(event) {
   if (sendIntervalTimer) {
     clearInterval(sendIntervalTimer);
     sendIntervalTimer = null;
   }
   const ms = Number(event.target.value);
-  if (ms > 0) {
-    sendIntervalTimer = setInterval(sendCanMessage, ms);
-  }
+  if (ms > 0) sendIntervalTimer = setInterval(sendCanMessage, ms);
 }
 
 /**
  * Toggles spacebar-to-send functionality.
  */
-function handleSpacebarToggle(event) {
-  if (event.target.checked) {
-    window.addEventListener('keydown', spacebarHandler);
-  } else {
-    window.removeEventListener('keydown', spacebarHandler);
-  }
+export function handleSpacebarToggle(event) {
+  if (event.target.checked) window.addEventListener('keydown', spacebarHandler);
+  else window.removeEventListener('keydown', spacebarHandler);
 }
 
 /**
  * Sends on Space key.
  * @param {KeyboardEvent} e
  */
-function spacebarHandler(e) {
+export function spacebarHandler(e) {
   if (e.code === 'Space') {
     e.preventDefault();
     sendCanMessage();
   }
 }
-
-// Wire up UI events
-connectButton.addEventListener('click',      connectDevice);
-sendButton.addEventListener('click',         sendCanMessage);
-sendIntervalSelect.addEventListener('change', handleIntervalChange);
-spacebarCheckbox.addEventListener('change',   handleSpacebarToggle);

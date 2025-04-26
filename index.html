@@ -1,62 +1,122 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebUSB CAN Interface</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>WebUSB CAN Interface</h1>
+  <!-- Page header with connection controls -->
+  <header>
+    <h1>WebUSB CAN Interface</h1>
+    <button
+      type="button"
+      id="connect-button"
+      aria-controls="connect-status"
+      aria-live="polite"
+    >
+      Connect
+    </button>
+    <span id="connect-status" role="status">Not Connected</span>
+  </header>
 
-  <button id="connect-btn">Connect</button>
-  <span id="connect-status">Not Connected</span>
+  <main>
+    <!-- CAN bus log section -->
+    <section aria-labelledby="log-heading">
+      <h2 id="log-heading">CAN Bus Log</h2>
+      <div id="log-table-wrapper">
+        <table id="log-table" class="log-table">
+          <caption>Received CAN messages with timestamps, identifiers, and data</caption>
+          <thead>
+            <tr>
+              <th scope="col">Timestamp</th>
+              <th scope="col">CAN ID</th>
+              <th scope="col">Type</th>
+              <th scope="col">DLC</th>
+              <th scope="col">Data</th>
+            </tr>
+          </thead>
+          <tbody id="log-body"><!-- Populated dynamically --></tbody>
+        </table>
+      </div>
+    </section>
 
-  <h2>📥 CAN Bus Log</h2>
-  <div id="log-table-wrapper">
-    <table id="log-table" class="log-table">
-      <thead>
-        <tr>
-          <th>Timestamp</th>
-          <th>CAN ID</th> 
-          <th>Type</th>
-          <th>DLC</th>
-          <th>Data</th>
-        </tr>
-      </thead>
-      <tbody id="log-body"></tbody>
-    </table>
-  </div>    
+    <!-- CAN message sender section -->
+    <section aria-labelledby="sender-heading">
+      <h2 id="sender-heading">CAN Message Sender</h2>
+      <form id="message-sender">
+        <fieldset>
+          <legend>Configure and send CAN messages</legend>
 
-  <h2>📤 CAN Message Sender</h2>
-  <div id="sender">
+          <div class="form-group">
+            <label for="can-id">CAN ID (8 hex digits):</label>
+            <input
+              type="text"
+              id="can-id"
+              name="canId"
+              maxlength="8"
+              pattern="[0-9A-Fa-f]{8}"
+              title="Enter exactly 8 hexadecimal characters (0-9, A-F)"
+              placeholder="e.g. 1FFFFFFF"
+              required
+            >
+          </div>
 
-    <label>CAN ID (hex, 8 chars):
-      <input type="text" id="can-id" maxlength="8" placeholder="e.g. 1FFFFFFF" />
-    </label>
+          <div class="form-group">
+            <label for="can-id-type">ID Type:</label>
+            <select id="can-id-type" name="idType">
+              <option value="STD">Standard (11-bit)</option>
+              <option value="EXT">Extended (29-bit)</option>
+            </select>
+          </div>
 
-    <label>
-      ID Type:
-      <select id="can-id-type">
-        <option value="STD">Standard (11-bit)</option>
-        <option value="EXT">Extended (29-bit)</option>
-      </select>
-    </label>
-    
-    <label>Data (hex bytes, space separated):
-      <input type="text" id="can-data" placeholder="e.g. 11 22 33" />
-    </label>
+          <div class="form-group">
+            <label for="can-data">Data (hex bytes, space separated):</label>
+            <input
+              type="text"
+              id="can-data"
+              name="canData"
+              placeholder="e.g. 11 22 33"
+              pattern="^([0-9A-Fa-f]{2})(\s[0-9A-Fa-f]{2})*$"
+              title="Enter hex bytes (2 characters) separated by spaces"
+            >
+          </div>
 
-    <label>Send Interval (ms):
-      <input type="number" id="send-interval" min="0" max="65535" value="100" />
-    </label>
+          <div class="form-group">
+            <label for="send-interval">Send Interval (ms):</label>
+            <input
+              type="number"
+              id="send-interval"
+              name="interval"
+              min="0"
+              max="65535"
+              value="100"
+            >
+          </div>
 
-    <button id="send-btn">Send Now</button>
+          <div class="form-group">
+            <button type="button" id="send-button">Send Now</button>
+          </div>
 
-    <label><input type="checkbox" id="send-on-space" /> Send on Spacebar</label>
-    
-  </div>
+          <div class="form-group">
+            <input
+              type="checkbox"
+              id="send-on-space"
+              name="sendOnSpace"
+            >
+            <label for="send-on-space">Send on Spacebar</label>
+          </div>
+        </fieldset>
+      </form>
+    </section>
+  </main>
 
-  <script src="script.js"></script>
+  <!-- Load your module and initialize it -->
+  <script type="module">
+    import { init } from './canUsbLogger.js';
+    // on module load, bind everything
+    init();
+  </script>
 </body>
 </html>
