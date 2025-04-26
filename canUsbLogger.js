@@ -41,6 +41,9 @@ let intervalSelect;
 let spacebarCheckbox;
 let exportButton;
 
+// Track one entry per ID+type (ordered by most recent insertion)
+const uniqueMap = new Map();
+
 // ————— Initialization —————————————————————————————————————————————————
 
 /**
@@ -63,12 +66,18 @@ export function init(ids = {}) {
   }
 
   renderLog(); // show empty padded table
+  renderUnique();    // <-- ensure the 10-row skeleton shows immediately
 
   connectButton.addEventListener('click',      connectDevice);
   sendButton.addEventListener('click',         sendCanMessage);
   intervalSelect.addEventListener('change',    onIntervalChange);
   spacebarCheckbox.addEventListener('change',  onSpacebarToggle);
   exportButton.addEventListener('click',       exportLog);
+
+  document.getElementById('clear-unique').addEventListener('click', () => {
+    uniqueMap.clear();
+    renderUnique();
+  });  
 }
 
 // ————— Helpers ——————————————————————————————————————————————————————
@@ -156,21 +165,33 @@ function renderLog() {
  * @param {string[]} dataBytes
  */
 export function logCanMessage(idHex, type, dlc, dataBytes) {
-  if (fullLog.length === 0) {
-    startTimeMs = performance.now();
-  }
-
-  const elapsedSec = (performance.now() - startTimeMs) / 1000;
-  fullLog.push({
+  if (fullLog.length === 0) startTimeMs = performance.now();
+  const offset = (performance.now() - startTimeMs) / 1000;
+  const entry = {
     timestamp: getFormattedTimestamp(),
-    offset:    elapsedSec,
+    offset,
     id:        formatCanId(idHex, type),
     type,
     dlc,
-    data:      dataBytes.join(' '),
-  });
+    data:      dataBytes.join(' ')
+  };
+  fullLog.push(entry);
+
+  // UNIQUE logic: only first insertion fixes row position—but update its count & latest data
+  const key = entry.id + '|' + entry.type;
+  if (uniqueMap.has(key)) {
+    const uni = uniqueMap.get(key);
+    uni.count++;
+    uni.timestamp = entry.timestamp;
+    uni.dlc       = entry.dlc;
+    uni.data      = entry.data;
+  } else {
+    entry.count = 1;
+    uniqueMap.set(key, entry);
+  }
 
   renderLog();
+  renderUnique();
 }
 
 // ————— USB Connection & I/O ——————————————————————————————————————
@@ -353,5 +374,34 @@ export async function exportLog() {
   } catch (error) {
     console.error('exportLog:', error);
     logCanMessage('----', 'SYS', 0, [error.message]);
+  }
+}
+
+/**
+ * Renders up to 10 unique messages (most recently updated) into #unique-body
+ */
+function renderUnique() {
+  const tbody = document.getElementById('unique-body');
+  tbody.innerHTML = '';
+
+  // Always show in insertion order, up to 10 distinct entries
+  const entries = Array.from(uniqueMap.values()).slice(0, 10);
+  const pad     = 10 - entries.length;
+
+  entries.forEach(e => {
+    const tr = document.createElement('tr');
+    [e.timestamp, e.id, e.type, e.dlc, e.data, e.count].forEach(txt => {
+      const td = document.createElement('td');
+      td.textContent = txt;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+
+  // Pad out to exactly 10 rows
+  for (let i = 0; i < pad; i++) {
+    const tr = document.createElement('tr');
+    for (let j = 0; j < 6; j++) tr.appendChild(document.createElement('td'));
+    tbody.appendChild(tr);
   }
 }

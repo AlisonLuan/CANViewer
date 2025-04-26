@@ -60,3 +60,48 @@ label {
   border: 1px solid #ccc;
   margin-bottom: 20px;
 }
+
+/* Unique-message summary */
+#unique-section {
+  margin-top: 1em;
+}
+
+#unique-table-wrapper {
+  max-height: 200px;
+  overflow-y: auto;    /* vertical scroll */
+  border: 1px solid #ccc;
+  margin-bottom: 20px; /* match #log-table-wrapper */
+}
+
+#unique-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#unique-table th,
+#unique-table td {
+  padding: 6px 12px;
+  text-align: left;
+  border-bottom: 1px solid #ddd;
+  font-family: monospace;
+}
+
+#unique-table thead {
+  background-color: #eee;
+  position: sticky;
+  top: 0;
+}
+
+#unique-section h2 {
+  display: flex;
+  align-items: center;
+}
+#unique-section h2 #unique-count {
+  font-weight: normal;
+  margin: 0 0.25em;
+}
+#clear-unique {
+  margin-left: auto;
+  font-size: 0.9em;
+  padding: 4px 8px;
+}

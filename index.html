@@ -57,6 +57,30 @@
       </div>
     </section>
 
+    <!-- Unique-message summary (max 10 rows) -->
+    <section aria-labelledby="unique-heading" id="unique-section">
+      <h2 id="unique-heading">Unique CAN Messages</h2>
+      <button type="button" id="clear-unique">Clear Unique</button>
+      <div id="unique-table-wrapper">
+        <table id="unique-table" class="log-table">
+          <caption>Last 10 unique ID+type messages (most recent)</caption>
+          <thead>
+            <tr>
+              <th scope="col">Timestamp</th>
+              <th scope="col">CAN ID</th>
+              <th scope="col">Type</th>
+              <th scope="col">DLC</th>
+              <th scope="col">Data</th>
+              <th scope="col">Count</th>
+            </tr>
+          </thead>
+          <tbody id="unique-body">
+            <!-- Populated dynamically -->
+          </tbody>
+        </table>
+      </div>
+    </section>
+
     <!-- CAN message sender section -->
     <section aria-labelledby="sender-heading">
       <h2 id="sender-heading">CAN Message Sender</h2>
