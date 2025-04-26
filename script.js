@@ -1,161 +1,255 @@
-let device;
-let sendIntervalId = null;
-const logBody = document.getElementById("log-body");
+// canUsbLogger.js
 
-function logCANMessage(idHex, type, dlc, dataArray) {
-  const tr = document.createElement("tr");
+/**
+ * @module canUsbLogger
+ * Handles USB-CAN device connection, message logging, and message sending.
+ */
 
-  const tdTimestamp = document.createElement("td");
+const USB_VENDOR_ID = 0x0483;
+const USB_INTERFACE_NUMBER = 0;
+const USB_ENDPOINT_IN = 1;
+const USB_ENDPOINT_OUT = 1;
+const MAX_LOG_ROWS = 500;
+
+let usbDevice = null;
+let sendIntervalTimer = null;
+
+const logTableBody = document.getElementById('log-body');
+const connectButton = document.getElementById('connect-btn');
+const connectionStatus = document.getElementById('connect-status');
+const sendButton = document.getElementById('send-btn');
+const sendIntervalSelect = document.getElementById('send-interval');
+const spacebarCheckbox = document.getElementById('send-on-space');
+
+/**
+ * Returns current time as "HH:mm:ss.SSS".
+ * @returns {string}
+ */
+const getFormattedTimestamp = () => {
   const now = new Date();
-  const timeString = now.toLocaleTimeString('en-US', { hour12: false }) + '.' + now.getMilliseconds().toString().padStart(3, '0');
-  tdTimestamp.textContent = timeString;
+  const time = now.toLocaleTimeString('en-GB', { hour12: false });
+  const ms = now.getMilliseconds().toString().padStart(3, '0');
+  return `${time}.${ms}`;
+};
 
-  const tdId = document.createElement("td");
-  let formattedId;
-  if (type === "SYS") {
-    formattedId = idHex;
-  } else {
-    let rawId = parseInt(idHex, 16);
-    if (isNaN(rawId)) rawId = 0;
-    if (type === "STD") {
-      rawId &= 0x7FF;
-      formattedId = rawId.toString(16).padStart(3, '0').toUpperCase();
-    } else {
-      rawId &= 0x1FFFFFFF;
-      formattedId = rawId.toString(16).padStart(8, '0').toUpperCase();
-    }
-  }
-  tdId.textContent = formattedId;
-
-  const tdType = document.createElement("td");
-  tdType.textContent = type;
-
-  const tdDlc = document.createElement("td");
-  tdDlc.textContent = dlc;
-
-  const tdData = document.createElement("td");
-  tdData.textContent = dataArray.join(" ");
-
-  tr.appendChild(tdTimestamp);
-  tr.appendChild(tdId);
-  tr.appendChild(tdType);
-  tr.appendChild(tdDlc);
-  tr.appendChild(tdData);
-
-  logBody.appendChild(tr);
-
-  const MAX_LOG_ROWS = 500;
-  if (logBody.children.length > MAX_LOG_ROWS) {
-    logBody.removeChild(logBody.firstChild);
+/**
+ * Formats a raw CAN ID into SYS, STD or EXT display string.
+ * @param {string} idHex - Hex string input.
+ * @param {'SYS'|'STD'|'EXT'} type - Message type.
+ * @returns {string}
+ */
+const formatCanId = (idHex, type) => {
+  if (type === 'SYS') {
+    return idHex.toUpperCase();
   }
 
-  tr.scrollIntoView({ behavior: "smooth" });
-}
+  let raw = parseInt(idHex, 16);
+  if (Number.isNaN(raw)) {
+    console.warn(`Invalid CAN ID "${idHex}", defaulting to 0`);
+    raw = 0;
+  }
 
-const connectBtn = document.getElementById("connect-btn");
-const connectStatus = document.getElementById("connect-status");
+  if (type === 'STD') {
+    raw &= 0x7FF;
+    return raw.toString(16).padStart(3, '0').toUpperCase();
+  }
 
-connectBtn.addEventListener("click", async () => {
+  // EXT
+  raw &= 0x1FFFFFFF;
+  return raw.toString(16).padStart(8, '0').toUpperCase();
+};
+
+/**
+ * Appends a CAN message row to the log table, trimming old entries.
+ * @param {string} idHex
+ * @param {'SYS'|'STD'|'EXT'|'TX'} type
+ * @param {number} dlc
+ * @param {string[]} dataBytes
+ */
+const logCanMessage = (idHex, type, dlc, dataBytes) => {
+  const row = document.createElement('tr');
+  const cells = {
+    timestamp: getFormattedTimestamp(),
+    id:      formatCanId(idHex, type),
+    type,
+    dlc,
+    data: dataBytes.join(' '),
+  };
+
+  Object.values(cells).forEach(text => {
+    const td = document.createElement('td');
+    td.textContent = text;
+    row.appendChild(td);
+  });
+
+  logTableBody.appendChild(row);
+
+  // Keep log to MAX_LOG_ROWS
+  while (logTableBody.children.length > MAX_LOG_ROWS) {
+    logTableBody.removeChild(logTableBody.firstChild);
+  }
+
+  row.scrollIntoView({ behavior: 'smooth' });
+};
+
+/**
+ * Connects to the USB-CAN device and begins listening.
+ */
+async function connectDevice() {
   try {
-    device = await navigator.usb.requestDevice({ filters: [{ vendorId: 0x0483 }] });
-    await device.open();
-    if (device.configuration === null) await device.selectConfiguration(1);
-    await device.claimInterface(0);
-    connectStatus.textContent = "Connected";
+    usbDevice = await navigator.usb.requestDevice({
+      filters: [{ vendorId: USB_VENDOR_ID }],
+    });
+    await usbDevice.open();
+    if (!usbDevice.configuration) {
+      await usbDevice.selectConfiguration(1);
+    }
+    await usbDevice.claimInterface(USB_INTERFACE_NUMBER);
+
+    connectionStatus.textContent = 'Connected';
     listenToDevice();
-  } catch (err) {
-    console.error(err);
-    logCANMessage("----", "SYS", "-", [err.message || "Error"]);
+  } catch (error) {
+    console.error(error);
+    logCanMessage('----', 'SYS', 0, [error.message || 'Connection Error']);
   }
-});
+}
 
+/**
+ * Continuously reads CAN frames from the device and logs them.
+ */
 async function listenToDevice() {
-  while (device && device.opened) {
+  while (usbDevice && usbDevice.opened) {
     try {
-      const result = await device.transferIn(1, 64);
-      if (result.status === "ok" && result.data && result.data.byteLength >= 5) {
+      const result = await usbDevice.transferIn(USB_ENDPOINT_IN, 64);
+      if (result.status === 'ok' && result.data.byteLength >= 5) {
         const view = new DataView(result.data.buffer);
-        const canId = view.getUint32(0, true);
-        const dlc = view.getUint8(4);
-        const available = result.data.byteLength;
-        const dataBytes = Math.min(dlc, available - 5);
-        const data = [];
+        const rawId = view.getUint32(0, true);
+        const dlc   = view.getUint8(4);
+        const availableBytes = result.data.byteLength - 5;
+        const count = Math.min(dlc, availableBytes);
 
-        for (let i = 0; i < dataBytes; i++) {
-          data.push(view.getUint8(5 + i).toString(16).padStart(2, '0').toUpperCase());
-        }
+        const dataBytes = Array.from({ length: count }, (_, i) =>
+          view.getUint8(5 + i).toString(16).padStart(2, '0').toUpperCase()
+        );
 
-        const extended = (canId & 0x80000000) !== 0;
-        const idDisplay = (canId >>> 0).toString(16).padStart(8, '0').toUpperCase();
-        logCANMessage(idDisplay, extended ? "EXT" : "STD", dlc, data);
+        const isExtended = Boolean(rawId & 0x80000000);
+        const idHex = (rawId >>> 0).toString(16).padStart(8, '0').toUpperCase();
+        logCanMessage(idHex, isExtended ? 'EXT' : 'STD', dlc, dataBytes);
       }
-    } catch (err) {
-      console.error(err);
-      logCANMessage("----", "SYS", "-", [err.message || "Error"]);
+    } catch (error) {
+      console.error(error);
+      logCanMessage('----', 'SYS', 0, [error.message || 'Read Error']);
+      break; // stop on persistent read error
     }
   }
 }
 
-function parseHexInput(input) {
-  return input.trim().split(/\s+/).map(byte => parseInt(byte, 16));
-}
+/**
+ * Parses a space-separated hex string into an array of byte values.
+ * @param {string} input
+ * @returns {number[]}
+ */
+const parseHexString = input =>
+  input
+    .trim()
+    .split(/\s+/)
+    .map(byte => {
+      const val = parseInt(byte, 16);
+      if (Number.isNaN(val)) {
+        throw new Error(`Invalid hex byte "${byte}"`);
+      }
+      return val;
+    });
 
-async function sendCANMessage() {
-  if (!device) return;
+/**
+ * Builds and sends a CAN message from UI inputs.
+ */
+async function sendCanMessage() {
+  if (!usbDevice) {
+    return;
+  }
 
-  const idInput = document.getElementById("can-id").value;
-  const dataInput = document.getElementById("can-data").value;
-  const idType = document.getElementById("can-id-type").value;
+  const idHexInput    = document.getElementById('can-id').value;
+  const dataHexInput  = document.getElementById('can-data').value;
+  const idType        = document.getElementById('can-id-type').value;
 
-  let id = parseInt(idInput, 16);
-  if (isNaN(id)) id = 0;
+  let id = parseInt(idHexInput, 16);
+  if (Number.isNaN(id)) {
+    console.warn(`Invalid ID "${idHexInput}", defaulting to 0`);
+    id = 0;
+  }
 
-  // Sanitize ID based on type
-  if (idType === "STD") {
+  if (idType === 'STD') {
     id &= 0x7FF;
   } else {
+    // EXT: mask and set MSB
     id &= 0x1FFFFFFF;
-    id |= 0x80000000; // Set MSB for extended
+    id |= 0x80000000;
   }
 
-  const data = parseHexInput(dataInput);
-  const buffer = new ArrayBuffer(5 + data.length);
-  const view = new DataView(buffer);
+  let dataBytes;
+  try {
+    dataBytes = parseHexString(dataHexInput);
+  } catch (parseError) {
+    console.error(parseError);
+    logCanMessage('----', 'SYS', 0, [parseError.message]);
+    return;
+  }
 
+  const buffer = new ArrayBuffer(5 + dataBytes.length);
+  const view   = new DataView(buffer);
   view.setUint32(0, id, true);
-  view.setUint8(4, data.length);
-  data.forEach((val, idx) => view.setUint8(5 + idx, val));
+  view.setUint8(4, dataBytes.length);
+  dataBytes.forEach((b, idx) => view.setUint8(5 + idx, b));
 
   try {
-    await device.transferOut(1, buffer);
-    logCANMessage(id.toString(16).toUpperCase().padStart(8, '0'), "TX", data.length, data);
-  } catch (err) {
-    console.error(err);
-    logCANMessage("----", "SYS", "-", [err.message || "Error"]);
+    await usbDevice.transferOut(USB_ENDPOINT_OUT, buffer);
+    const idHex = id.toString(16).padStart(8, '0').toUpperCase();
+    logCanMessage(idHex, 'TX', dataBytes.length, dataBytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()));
+  } catch (error) {
+    console.error(error);
+    logCanMessage('----', 'SYS', 0, [error.message || 'Send Error']);
   }
 }
 
-document.getElementById("send-btn").addEventListener("click", sendCANMessage);
-
-document.getElementById("send-interval").addEventListener("change", (e) => {
-  if (sendIntervalId) clearInterval(sendIntervalId);
-  const interval = parseInt(e.target.value);
-  if (interval > 0) {
-    sendIntervalId = setInterval(sendCANMessage, interval);
+/**
+ * Handles enabling/disabling periodic send.
+ */
+function handleIntervalChange(event) {
+  if (sendIntervalTimer) {
+    clearInterval(sendIntervalTimer);
+    sendIntervalTimer = null;
   }
-});
+  const ms = Number(event.target.value);
+  if (ms > 0) {
+    sendIntervalTimer = setInterval(sendCanMessage, ms);
+  }
+}
 
-document.getElementById("send-on-space").addEventListener("change", (e) => {
-  if (e.target.checked) {
-    window.addEventListener("keydown", spacebarHandler);
+/**
+ * Toggles spacebar-to-send functionality.
+ */
+function handleSpacebarToggle(event) {
+  if (event.target.checked) {
+    window.addEventListener('keydown', spacebarHandler);
   } else {
-    window.removeEventListener("keydown", spacebarHandler);
-  }
-});
-
-function spacebarHandler(e) {
-  if (e.code === "Space") {
-    e.preventDefault();
-    sendCANMessage();
+    window.removeEventListener('keydown', spacebarHandler);
   }
 }
+
+/**
+ * Sends on Space key.
+ * @param {KeyboardEvent} e
+ */
+function spacebarHandler(e) {
+  if (e.code === 'Space') {
+    e.preventDefault();
+    sendCanMessage();
+  }
+}
+
+// Wire up UI events
+connectButton.addEventListener('click',      connectDevice);
+sendButton.addEventListener('click',         sendCanMessage);
+sendIntervalSelect.addEventListener('change', handleIntervalChange);
+spacebarCheckbox.addEventListener('change',   handleSpacebarToggle);
