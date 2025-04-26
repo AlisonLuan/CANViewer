@@ -50,7 +50,6 @@ class CanUsbLogger {
     this.logTableBody     = document.querySelector(sel.logBody);
     this.connectButton    = document.querySelector(sel.connectBtn);
     this.connectionStatus = document.querySelector(sel.statusLabel);
-    this.spacebarCheckbox = document.querySelector(sel.spacebarBox);
     this.exportButton     = document.querySelector(sel.exportBtn);
     this.clearUniqueBtn   = document.querySelector(sel.clearUnique);
     this.sendTableBody    = document.querySelector(sel.sendBody);
@@ -72,7 +71,6 @@ class CanUsbLogger {
     this.renderSendTable();
 
     this.connectButton.addEventListener('click',      () => this.connectDevice());
-    this.spacebarCheckbox.addEventListener('change',  (e) => this.handleSpacebarToggle(e));
     this.exportButton.addEventListener('click',       () => this.exportLog());
     this.clearUniqueBtn.addEventListener('click',     () => {
       this.uniqueMap.clear();
