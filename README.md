@@ -1,102 +1,86 @@
-
 # 🛠 WebUSB CAN Interface Viewer
 
-![Example](./Images/example.png)
+![Screenshot](./Images/example.png)
 
-A lightweight and modern CAN viewer and sender built with **WebUSB** and **STM32 HAL**, communicating via a **Custom HID** USB interface.  
-Designed for quick prototyping and testing CAN messages directly from your browser — no external software required.
+A modern, browser-based CAN bus tool that lets you **log**, **inspect**, **filter unique**, **configure**, and **send** CAN messages over USB (Custom HID) — all from your browser.
 
 ---
 
 ## 📦 Features
 
-- ✅ Send & receive CAN messages from STM32 to the browser
-- ✅ Display structured CAN frames in real-time (ID, Type, DLC, Data, Timestamp)
-- ✅ Support for both **Standard (11-bit)** and **Extended (29-bit)** CAN IDs
-- ✅ Fixed-size USB HID report format for fast USB transfers (64 bytes)
-- ✅ Timestamping using PC system clock
-- ✅ Auto-scroll with limited message history (20 latest entries)
-- ✅ Easy message injection from browser
-- ✅ Works directly with Chrome/Edge via WebUSB
+- 🔄 **Real-time CAN logging**: Live view of incoming CAN frames with timestamp, ID, type (STD/EXT), DLC, and data.
+- 🔢 **Unique message summary**: See up to 10 distinct ID+type messages with counts, updated in place.
+- 📤 **Table-driven sender**: Configure up to 10 send templates (ID, type, data, interval) with per-row **Send Now** and auto-repeat.
+- 💾 **Export in multiple formats**:
+  - **CSV** (comma-separated, quoted)
+  - **Peak TRC** (Peak Systems trace format)
+  - **ASC** (CANalyzer/BusMaster ASCII log)
+- ⚙️ **Modular codebase**:
+  - **`canUsbLogger.js`** – core logic, UI binding, logging, unique & send tables
+  - **`traceExporter.js`** – standalone CSV/TRC/ASC generators
+- 📱 **WebUSB support**: Works in Chrome/Edge; communicates with STM32 via Custom HID.
 
 ---
 
-## 🧰 Project Structure
+## 🎯 Project Structure
 
 ```
-.
-├── index.html           # Main frontend UI
-├── style.css            # Web styling
-├── Images/
-│   └── example.png      # Screenshot used in README
-├── Core/
-│   └── Src/
-│       └── main.c       # STM32 HAL CAN + USB logic
-└── Drivers/
-    └── USB/             # USB middleware with Custom HID
+├── index.html          # Frontend UI
+├── style.css           # Styles
+├── canUsbLogger.js     # Main module (ES6 class)
+├── traceExporter.js    # Trace export utilities
+├── Images/             # Assets (screenshots)
+│   └── example.png     # README image
+└── README.md           # Project documentation
 ```
 
 ---
 
-## 🚀 How to Use
+## 🚀 Quick Start
 
-### 💻 PC Side
-
-1. Open `index.html` in Chrome or Edge.
-2. Click **"Connect"** and allow access to the STM32 USB device.
-3. Messages will start showing up instantly from CAN.
-4. Use the **Send** section to transmit data to the microcontroller.
-
-### 📱 Firmware (STM32)
-
-1. Uses CAN2 and USB device (Custom HID)
-2. Sends reports in format:
-    - `[0..3]` → `CAN ID` (4 bytes, MSB marks EXT)
-    - `[4]` → `DLC`
-    - `[5..(5+DLC-1)]` → `CAN Data`
-3. Listens for IN reports from the PC:
-    - Parses `CAN ID + DLC + Data`
-    - Transmits over CAN2 immediately
+1. **Serve** this folder over HTTP (e.g., `npx http-server .`).
+2. Open `index.html` in Chrome/Edge.
+3. Click **Connect** and authorize the STM32 USB-CAN device.
+4. **Monitor** live CAN frames in the **CAN Bus Log**.
+5. **View** up to 10 unique ID+type messages with counts.
+6. **Configure** send templates and click **Send Now** or let it auto-repeat.
+7. Click **Export Log** to download CSV, TRC, or ASC of the full log.
 
 ---
 
-## 🧪 HID Report Format
+## 📃 Trace Export Formats
 
-| Byte(s) | Description      |
-|---------|------------------|
-| 0..3    | CAN ID (w/ MSB = EXT) |
-| 4       | DLC (0–8)        |
-| 5..12   | CAN Data         |
-| 13..63  | Reserved / zero  |
+### CSV
+Standard comma-separated values, double-quoted; importable in spreadsheets.
 
----
+### Peak TRC
+Peak Systems `.trc` with `$FILEVERSION`, `$STARTTIME`, column headers, and aligned fields.
 
-## 🛠 Requirements
-
-- STM32 with USB Full-Speed peripheral
-- Chrome or Edge browser (WebUSB support)
-- ST HAL Libraries (CAN + USB Device)
-- `usbd_customhid.c` modified to support IN/OUT endpoints
+### ASC
+CANalyzer/BusMaster ASCII `.asc` with timestamps and direction markers.
 
 ---
 
-## 📸 Screenshot
+## 🛠 Firmware Requirements
 
-See `Images/example.png` for a visual of the UI in action.
-
----
-
-## 📃 License
-
-This project is licensed under the terms provided by STMicroelectronics and the contributor.  
-See `LICENSE` file for full details.
+- **STM32** with USB Full-Speed (Custom HID) peripheral
+- Custom HID report format:
+  - Bytes 0–3: CAN ID (MSB = EXT flag)
+  - Byte 4: DLC (0–8)
+  - Bytes 5–(5+DLC−1): Data
+  - Remaining bytes zeroed
+- Firmware parses OUT reports (ID+DLC+Data) → sends on CAN2; sends IN reports for browser.
 
 ---
 
 ## 🤝 Contributing
 
-Found a bug or have an idea? PRs and suggestions are welcome!
+Issues and PRs welcome!
 
 ---
 
-Made with ❤️ using STM32 + WebUSB
+## 📜 License
+
+Licensed under terms from STMicroelectronics and contributors.
+
+*Built with ❤️ using STM32 HAL & WebUSB.*
