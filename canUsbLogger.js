@@ -128,9 +128,9 @@ class CanUsbLogger {
     const recent = this.fullLog.slice(-CanUsbLogger.VISIBLE_LOG_ROWS).reverse();
     const padCount = CanUsbLogger.VISIBLE_LOG_ROWS - recent.length;
 
-    recent.forEach(({ timestamp, id, type, dlc, data }) => {
+    recent.forEach(({ timestamp, bus, id, type, dlc, data }) => {
       const tr = document.createElement('tr');
-      [timestamp, id, type, dlc, data].forEach((text) => {
+      [timestamp, bus, id, type, dlc, data].forEach((text) => {
         const td = document.createElement('td');
         td.textContent = text;
         tr.appendChild(td);
@@ -151,9 +151,9 @@ class CanUsbLogger {
     const entries = Array.from(this.uniqueMap.values()).slice(0, CanUsbLogger.UNIQUE_TABLE_ROWS);
     const padCount = CanUsbLogger.UNIQUE_TABLE_ROWS - entries.length;
 
-    entries.forEach(({ timestamp, id, type, dlc, data, count }) => {
+    entries.forEach(({ timestamp, bus, id, type, dlc, data, count }) => {
       const tr = document.createElement('tr');
-      [timestamp, id, type, dlc, data, count].forEach((text) => {
+      [timestamp, bus, id, type, dlc, data, count].forEach((text) => {
         const td = document.createElement('td');
         td.textContent = text;
         tr.appendChild(td);
@@ -241,22 +241,23 @@ class CanUsbLogger {
    * @param {number} dlc
    * @param {string[]} dataBytes
    */
-  logCanMessage(idHex, type, dlc, dataBytes) {
+  logCanMessage(bus, idHex, type, dlc, dataBytes) {
     if (this.fullLog.length === 0) this.startTimeMs = performance.now();
     const offset = (performance.now() - this.startTimeMs) / 1000;
     const entry = {
       timestamp: this.getFormattedTimestamp(),
       offset,
-      id:        this.formatCanId(idHex, type),
+      bus,            
+      id: idHex,
       type,
       dlc,
-      data:      dataBytes.join(' '),
+      data: dataBytes.join(' ')
     };
 
     this.fullLog.push(entry);
 
     // Unique map: update count or insert new
-    const key = `${entry.id}|${entry.type}`;
+    const key = `${entry.bus}|${entry.id}|${entry.type}`;
     if (this.uniqueMap.has(key)) {
       const existing = this.uniqueMap.get(key);
       existing.count++;
@@ -296,19 +297,28 @@ class CanUsbLogger {
   async listenToDevice() {
     while (this.usbDevice && this.usbDevice.opened) {
       try {
-        const result = await this.usbDevice.transferIn(CanUsbLogger.USB_ENDPOINT_IN, 64);
-        if (result.status === 'ok' && result.data.byteLength >= 5) {
-          const view      = new DataView(result.data.buffer);
-          const raw       = view.getUint32(0, true);
-          const dlc       = view.getUint8(4);
-          const count     = Math.min(dlc, result.data.byteLength - 5);
-          const bytes     = Array.from({ length: count }, (_, i) =>
-            view.getUint8(5 + i).toString(16).padStart(2, '0').toUpperCase()
+        const result = await this.usbDevice.transferIn(
+          CanUsbLogger.USB_ENDPOINT_IN, 64
+        );
+        if (result.status === 'ok' && result.data.byteLength >= 6) {
+          const view = new DataView(result.data.buffer);
+          // byte 0 = bus (0 = CAN1, 1 = CAN2)
+          const bus = view.getUint8(0);
+          // bytes 1–4 = CAN ID little-endian
+          const raw = view.getUint32(1, true);
+          // byte 5 = DLC
+          const dlc = view.getUint8(5);
+          // bytes 6+ = data
+          const count = Math.min(dlc, result.data.byteLength - 6);
+          const bytes = Array.from({ length: count }, (_, i) =>
+            view.getUint8(6 + i).toString(16).padStart(2, '0').toUpperCase()
           );
 
           const msgType = (raw & 0x80000000) ? 'EXT' : 'STD';
           const rawHex  = raw.toString(16).padStart(8, '0');
-          this.logCanMessage(rawHex, msgType, dlc, bytes);
+
+          // now log including the bus:
+          this.logCanMessage(bus, rawHex, msgType, dlc, bytes);
         }
       } catch (err) {
         console.error(err);
@@ -317,6 +327,7 @@ class CanUsbLogger {
       }
     }
   }
+
 
   /** Build and send a CAN message from UI inputs. */
   async sendCanMessage() {
